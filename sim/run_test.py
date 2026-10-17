@@ -47,7 +47,7 @@ def gen(rng, pol, n_obs):
     image = M.pack(pol)
     for a in rng.sample(range(len(image)), min(6, len(image))):
         send([ord("r")] + word(a)); exp.extend(word(image[a])); wait()
-    for a, v in ((M.CFG_BASE + 0, pol["N"]), (M.CFG_BASE + 1, pol["H"]), (M.REG_ID, M.ID_VALUE)):
+    for a, v in ((M.CFG_BASE + 0, 0), (M.REG_ID, M.ID_VALUE)):   # config is write-only
         send([ord("r")] + word(a)); exp.extend(word(v)); wait()
     if rng.random() < 0.5:                      # partial command, dropped after ~4 ms
         send([ord("x")] + [rng.randint(0, 255) for _ in range(rng.randint(0, 2 * pol["N"] - 1))])

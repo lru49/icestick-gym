@@ -9,7 +9,6 @@ import numpy as np
 ONE = 256
 ID_VALUE = 0x4D4C
 CFG_BASE = 0x200
-REG_CYCLES = 0x2FE
 REG_ID = 0x2FF
 MAX_N, MAX_H, MAX_K, WMEM = 14, 32, 4, 512
 

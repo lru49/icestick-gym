@@ -40,16 +40,15 @@ def main():
         bad = sum(1 for (o, a), s in zip(got, steps) if o != s[1] or a != s[2])
         bad_eps = sum(1 for e, i in zip(eps, np.cumsum([0] + [len(e["steps"]) for e in eps]))
                       if any(got[i + k][0] != s[1] or got[i + k][1] != s[2] for k, s in enumerate(e["steps"])))
-        cyc = dev.read(M.REG_CYCLES)
         r = {"task": ev["task"], "H": pol["H"], "params": ev["params"], "episodes": len(eps),
              "steps": len(steps), "mismatched_steps": bad, "mismatched_episodes": bad_eps,
              "mean_return": ev["mean"], "std": ev["std"], "threshold": ev["solved_threshold"],
-             "solved": ev["solved"], "inference_cycles": cyc, "inference_us": round(cyc / 12, 1),
+             "solved": ev["solved"],
              "replay_steps_per_s": round(len(steps) / dt)}
         results.append(r)
-        print("%-26s H=%-2d %3d eps %6d steps  FPGA mismatches: %d  return %.1f ± %.1f (threshold %s) %s  %d cyc/inf" % (
+        print("%-26s H=%-2d %3d eps %6d steps  FPGA mismatches: %d  return %.1f ± %.1f (threshold %s) %s  %d steps/s" % (
             r["task"], r["H"], r["episodes"], r["steps"], bad, r["mean_return"], r["std"], r["threshold"],
-            "SOLVED" if r["solved"] else "-", cyc), flush=True)
+            "SOLVED" if r["solved"] else "-", r["replay_steps_per_s"]), flush=True)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     json.dump(results, open(args.out, "w"), indent=1)
     print("wrote", args.out)

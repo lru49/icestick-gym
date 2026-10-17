@@ -14,8 +14,10 @@ $(B)/mlp.json: $(SRC)
 	yosys -q -l $(B)/yosys.log -p 'read_verilog $(SRC); synth_ice40 -abc9 -top top -json $@; tee -q -o $(B)/stat.txt stat'
 
 $(B)/mlp.asc: $(B)/mlp.json icestick.pcf
-	nextpnr-ice40 --hx1k --package tq144 --freq 12 --pcf icestick.pcf --json $< --asc $@ \
-	  > $(B)/pnr.log 2>&1 || { grep -E 'ERROR|ICESTORM_LC' $(B)/pnr.log; exit 1; }
+	for seed in 1 2 3 4 5 6 7 8; do \
+	  nextpnr-ice40 --hx1k --package tq144 --freq 12 --pcf icestick.pcf --json $< --asc $@ --seed $$seed \
+	    > $(B)/pnr.log 2>&1 && { echo "placed with seed $$seed"; break; }; \
+	  grep -E 'ERROR|ICESTORM_LC' $(B)/pnr.log; rm -f $@; done; test -f $@
 	grep -A8 'Device utilisation' $(B)/pnr.log
 	grep 'Max frequency' $(B)/pnr.log | tail -1
 

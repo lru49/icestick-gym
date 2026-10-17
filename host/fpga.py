@@ -53,9 +53,6 @@ class Fpga:
             back = [(b[2 * i] << 8) | b[2 * i + 1] for i in range(len(image))]
             if back != image:
                 raise IOError("weight readback mismatch")
-            for a, v in M.config_words(pol):
-                if self.read(a) != v:
-                    raise IOError("config readback mismatch at 0x%x" % a)
         self.K, self.N = pol["K"], pol["N"]
 
     def infer(self, x):

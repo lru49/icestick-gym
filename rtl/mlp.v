@@ -12,8 +12,7 @@
 // UART (1 Mbaud 8N1, big-endian):
 //   'w' ah al vh vl   addr < 0x200: weight word; 0x200 N, 0x201 H, 0x202 K,
 //                     0x203 S1, 0x204 S2                          -> 'k'
-//   'r' ah al         weight word / config; 0x2FE last inference cycles,
-//                     0x2FF ID 0x4D4C                              -> vh vl
+//   'r' ah al         weight word; 0x2FF reads the ID 0x4D4C       -> vh vl
 //   'x' x0h x0l ...   N observations                               -> argmax, o0h o0l, ...
 // 'x' commands may be pipelined: up to 4 can be outstanding (one input bank
 // each). A partial command is dropped after ~4 ms without bytes.
@@ -89,12 +88,12 @@ module top #(
     reg  [1:0] cbank = 0;           // bank being computed
     reg  [2:0] queued = 0;          // complete 'x' commands not yet computed
     reg        layer2 = 0;
-    reg  [7:0] in_base = 0;
+    reg  [5:0] in_off = 0;          // layer input offset inside the bank
     reg  [5:0] n_in = 0, n_out = 0, i = 0, j = 0;
     reg  [3:0] shamt = 0, lshift = 0;
     reg  [8:0] wptr = 0;
 
-    reg signed [39:0] acc = 0;
+    reg signed [36:0] acc = 0;      // 33 products of |2^30| fit in 37 bits
     reg signed [16:0] ph = 0;
     reg        [15:0] pl = 0;
     reg signed [15:0] mcand = 0;
@@ -102,8 +101,7 @@ module top #(
 
     reg signed [15:0] o0 = 0, o1 = 0, o2 = 0, o3 = 0, amax_v = 0;
     reg         [1:0] amax_i = 0;
-    reg        [15:0] cycles = 0, cyc_run = 0;
-    reg         [7:0] n_inf = 0;
+    reg         [3:0] n_inf = 0;
 
     // TX handshake: FSM launches an inference reply; parser launches others
     reg        inf_go = 0;
@@ -119,17 +117,16 @@ module top #(
     // Signed x signed shift-add: the last (sign) bit of the multiplier subtracts
     wire signed [17:0] psum = pl[0] ? ((mbit == 15) ? ph - mcand : ph + mcand) : ph;
     wire signed [32:0] prod = {psum[17:0], pl[15:1]};   // = (A*B) after the 16th step
-    wire               v_ovf = (acc[39:15] != {25{acc[39]}});
-    wire signed [15:0] v16 = v_ovf ? {acc[39], {15{!acc[39]}}} : acc[15:0];
+    wire               v_ovf = (acc[36:15] != {22{acc[36]}});
+    wire signed [15:0] v16 = v_ovf ? {acc[36], {15{!acc[36]}}} : acc[15:0];
     wire signed [15:0] vout = (!layer2 && v16[15]) ? 16'sd0 : v16;
-    wire        [7:0] ab = {cbank, 6'd0};
 
     always @(*) begin
         f_we = 0; f_waddr = 0; f_wdata = 0;
         case (st)
-            S_IDLE:  if (queued != 0 && !(rb_req && !rb_done)) begin f_we = 1; f_waddr = ab + cfg_n; f_wdata = 16'd256; end
-            S_OUT:   if (!layer2) begin f_we = 1; f_waddr = ab + 8'd16 + {2'd0, j}; f_wdata = vout; end
-            S_CONST: begin f_we = 1; f_waddr = ab + 8'd16 + cfg_h; f_wdata = 16'd256; end
+            S_IDLE:  if (queued != 0 && !(rb_req && !rb_done)) begin f_we = 1; f_waddr = {cbank, 2'd0, cfg_n}; f_wdata = 16'd256; end
+            S_OUT:   if (!layer2) begin f_we = 1; f_waddr = {cbank, 6'd16 + j}; f_wdata = vout; end
+            S_CONST: begin f_we = 1; f_waddr = {cbank, 6'd16 + cfg_h}; f_wdata = 16'd256; end
             default: ;
         endcase
     end
@@ -137,11 +134,9 @@ module top #(
     always @(posedge clk) begin
         inf_go  <= 0;
         rb_done <= 0;
-        if (st != S_IDLE && cyc_run != 16'hffff) cyc_run <= cyc_run + 1;
         if (x_done) queued <= queued + 1;
         case (st)
             S_IDLE: begin
-                cyc_run <= 1;
                 if (rb_req && !rb_done) begin
                     w_raddr <= rb_addr; st <= S_RB1;
                 end else if (queued != 0 && !p_we) begin
@@ -156,9 +151,9 @@ module top #(
             S_RB3: begin rb_val <= w_rdata; rb_done <= 1; st <= S_IDLE; end
             S_LSET: begin
                 if (!layer2) begin
-                    in_base <= ab; n_in <= cfg_n; n_out <= cfg_h; lshift <= cfg_s1;
+                    in_off <= 0; n_in <= cfg_n; n_out <= cfg_h; lshift <= cfg_s1;
                 end else begin
-                    in_base <= (cfg_h == 0) ? ab : ab + 8'd16;
+                    in_off  <= (cfg_h == 0) ? 6'd0 : 6'd16;
                     n_in    <= (cfg_h == 0) ? cfg_n : cfg_h;
                     n_out   <= cfg_k; lshift <= cfg_s2;
                 end
@@ -166,7 +161,7 @@ module top #(
                 st <= S_NSTART;
             end
             S_NSTART: begin acc <= 0; i <= 0; shamt <= lshift; st <= S_ADDR; end
-            S_ADDR: begin w_raddr <= wptr; a_raddr <= in_base + i; st <= S_WAIT; end
+            S_ADDR: begin w_raddr <= wptr; a_raddr <= {cbank, in_off + i}; st <= S_WAIT; end
             S_WAIT: st <= S_LOAD;
             S_LOAD: begin
                 ph <= 0; pl <= w_rdata; mcand <= a_rdata; mbit <= 0;
@@ -208,7 +203,6 @@ module top #(
             S_CONST: if (!p_we) begin layer2 <= 1; st <= S_LSET; end
             S_DONE: begin
                 inf_go <= 1;
-                cycles <= cyc_run;
                 cbank  <= cbank + 1;
                 n_inf  <= n_inf + 1;
                 st     <= S_IDLE;
@@ -274,19 +268,7 @@ module top #(
                         end
                         C_R: begin
                             if (!b0[1]) begin rb_req <= 1; rb_addr <= {b0[0], rx_data}; end
-                            else begin
-                                rep_len <= 2; rep_go <= 1;
-                                case (rx_data)
-                                    8'h00: rep_val <= cfg_n;
-                                    8'h01: rep_val <= cfg_h;
-                                    8'h02: rep_val <= cfg_k;
-                                    8'h03: rep_val <= cfg_s1;
-                                    8'h04: rep_val <= cfg_s2;
-                                    8'hfe: rep_val <= cycles;
-                                    8'hff: rep_val <= 16'h4d4c;
-                                    default: rep_val <= 0;
-                                endcase
-                            end
+                            else begin rep_len <= 2; rep_go <= 1; rep_val <= (rx_data == 8'hff) ? 16'h4d4c : 16'd0; end
                         end
                         default: begin x_done <= 1; wbank <= wbank + 1; end
                     endcase
@@ -335,5 +317,5 @@ module top #(
     end
 
     assign led_g = 1;
-    assign led_r = n_inf[7:4];
+    assign led_r = n_inf;
 endmodule
