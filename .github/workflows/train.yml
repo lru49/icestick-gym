@@ -1,0 +1,48 @@
+name: train
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Regex of task names to train (default: all)"
+        default: "."
+jobs:
+  train:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {task: CartPole-v1,              H: 0,  minutes: 10}
+          - {task: CartPole-v1,              H: 8,  minutes: 10}
+          - {task: Acrobot-v1,               H: 0,  minutes: 15}
+          - {task: Acrobot-v1,               H: 16, minutes: 15}
+          - {task: MountainCar-v0,           H: 0,  minutes: 15}
+          - {task: MountainCar-v0,           H: 16, minutes: 15}
+          - {task: MountainCarContinuous-v0, H: 0,  minutes: 15}
+          - {task: MountainCarContinuous-v0, H: 8,  minutes: 15}
+          - {task: Pendulum-v1,              H: 0,  minutes: 8}
+          - {task: Pendulum-v1,              H: 16, minutes: 30}
+          - {task: LunarLander-v3,           H: 0,  minutes: 60}
+          - {task: LunarLander-v3,           H: 16, minutes: 75}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Filter
+        id: f
+        run: echo "${{ matrix.task }}" | grep -Eq -- "${{ github.event.inputs.only || '.' }}" && echo "run=1" >> "$GITHUB_OUTPUT" || echo "skipping"
+      - uses: actions/setup-python@v5
+        if: steps.f.outputs.run == '1'
+        with: {python-version: "3.12", cache: pip}
+      - if: steps.f.outputs.run == '1'
+        run: pip install -q -r requirements.txt
+      - name: Train (CMA-ES on the bit-exact FPGA model) + evaluate 100 held-out episodes
+        if: steps.f.outputs.run == '1'
+        run: |
+          python train/train.py --task ${{ matrix.task }} --H ${{ matrix.H }} \
+            --minutes ${{ matrix.minutes }} --out out/${{ matrix.task }}-H${{ matrix.H }} | tee train.log
+          grep EVAL train.log >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: steps.f.outputs.run == '1'
+        with:
+          name: policy-${{ matrix.task }}-H${{ matrix.H }}
+          path: out/${{ matrix.task }}-H${{ matrix.H }}

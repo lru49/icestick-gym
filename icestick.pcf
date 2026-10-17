@@ -1,0 +1,8 @@
+set_io clk 21
+set_io uart_rx 9
+set_io uart_tx 8
+set_io led_g 95
+set_io led_r[0] 99
+set_io led_r[1] 98
+set_io led_r[2] 97
+set_io led_r[3] 96

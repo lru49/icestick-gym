@@ -1,0 +1,39 @@
+name: bitstream
+on:
+  push:
+    paths: [rtl/**, sim/**, host/mlp_model.py, icestick.pcf, Makefile, .github/workflows/build.yml]
+  workflow_dispatch:
+jobs:
+  bitstream:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - name: Install toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq yosys nextpnr-ice40 fpga-icestorm iverilog
+          pip install -q numpy==2.5.4
+      - name: RTL simulation vs golden model
+        run: python sim/run_test.py --seeds 16
+      - name: Synthesis, place & route, pack
+        run: make all
+      - name: Summary
+        run: |
+          {
+            echo "commit $GITHUB_SHA"
+            grep -A8 'Device utilisation' build/pnr.log
+            grep 'Max frequency' build/pnr.log | tail -1
+            sha256sum build/mlp.bin
+          } | tee build/summary.txt
+          { echo '```'; cat build/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bitstream
+          path: |
+            build/mlp.bin
+            build/summary.txt
+            build/pnr.log
+            build/stat.txt
