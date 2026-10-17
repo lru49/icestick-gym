@@ -6,7 +6,7 @@ on:
 jobs:
   bitstream:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -23,7 +23,7 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "commit $GITHUB_SHA"
+            echo "commit $GITHUB_SHA"; cat build/variant.txt
             grep -A8 'Device utilisation' build/pnr.log
             grep 'Max frequency' build/pnr.log | tail -1
             sha256sum build/mlp.bin
